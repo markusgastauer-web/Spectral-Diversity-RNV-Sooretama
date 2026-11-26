@@ -96,6 +96,13 @@ aspect <- terrain(
 )
 names(aspect) <- "aspect"
 
+flowdir <- terrain(
+  dem,
+  v = "flowdir",
+  neighbors = 8
+)
+names(flowdir) <- "flowdir"
+
 tri <- terrain(
   dem,
   v = "TRI",
@@ -113,6 +120,12 @@ names(tpi) <- "TPI"
 writeRaster(
   dem,
   file.path(output_dir, "resampled_dem.tif"),
+  overwrite = TRUE
+)
+
+writeRaster(
+  flowdir,
+  file.path(output_dir, "flowdir.tif"),
   overwrite = TRUE
 )
 
@@ -349,6 +362,7 @@ predictor_stack <- c(
   aspect,
   tri,
   tpi,
+  flowdir,
   vrm_in_div,
   vrm_out_div
 )
