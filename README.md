@@ -31,7 +31,6 @@ Together, these reserves cover more than 40,000 ha of old-growth tropical forest
 |----------|----------|
 | `sessionInfo_scripts01-03.txt` | R version, operating system, and package versions used to run Scripts 01–03. |
 | `sessionInfo_modelling.txt` | R version, operating system, and package versions used to run Script 04. |
-| `renv.lock` | Complete record of package dependencies required to reconstruct the computational environment. |
 
 ---
 
