@@ -38,11 +38,11 @@ Together, these reserves cover more than 40,000 ha of old-growth tropical forest
 
 The workflow requires:
 
-| Sentinel-2 Level-2A imagery |
-| SRTM digital elevation model |
-| River network |
-| MapBiomas Collection 9 land-cover map |
-| Detailed descriptions are provided in docs/input_data_description.csv |
+- Sentinel-2 Level-2A imagery
+- SRTM digital elevation model
+- River network
+- MapBiomas Collection 9 land-cover map
+- Detailed descriptions are provided in docs/input_data_description.csv |
 
 ---
 
