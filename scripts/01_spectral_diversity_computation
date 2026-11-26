@@ -1,0 +1,524 @@
+
+library(biodivMapR)
+library(raster)
+library(sp)
+library(stringr)
+library(sf)
+library(FD)
+library(terra)
+library(parallel)
+library(rasterdiv)
+library(data.table)
+
+nbCPU = 4
+MaxRAM = 30
+
+# -------------------------------------------------------------------------
+# Input data
+#
+# Replace the placeholders below with the paths to your own data.
+#
+# Required input:
+#   - input_raster.tif : multispectral raster image (e.g. Sentinel-2)
+#
+# Outputs:
+#   - PCA products
+#   - Spectral species maps
+#   - Alpha diversity metrics
+#   - Beta diversity maps
+#   - Rao's Q diversity maps
+# -------------------------------------------------------------------------
+
+name <- "input_raster"
+NDVI_Thresh <- 0.35
+Blue_Thresh <- 1350
+NIR_Thresh <- 500
+
+FilterPCA         = FALSE    # filters PCA outliers
+TypePCA     = 'SPCA'  
+
+my_list <- sprintf("%03d", 1:25) # number of iterations
+
+nbclusters <- 100 # number of spectral species
+
+window <- 9
+
+# Convert raster files to BIL/HDR format
+Input_Image_File <- paste0(name, ".tif")
+Input_Image_File  = raster2BIL(Raster_Path = Input_Image_File,
+                               Sensor = 'SENTINEL_2',
+                               Multiplying_Factor = 1,
+                               Convert_Integer = TRUE)
+
+
+Input_Image_File  = paste0("biodivMapR_Convert_BIL/", name)
+Input_Mask_File   = FALSE
+Output_Dir        = 'RESULTS_biodivMapR'
+
+print("PERFORM RADIOMETRIC FILTERING")  # filters clouds, shades and non-vegetated areas
+ImPathShade = perform_radiometric_filtering(Input_Image_File,Input_Mask_File,Output_Dir,
+                                            NDVI_Thresh = NDVI_Thresh, Blue_Thresh = Blue_Thresh,
+                                            NIR_Thresh = NIR_Thresh)
+
+print("PERFORM PCA ON RASTER") # performs PCA
+PCA_Output <- perform_PCA(Input_Image_File = Input_Image_File, Input_Mask_File = ImPathShade,
+                          Output_Dir = Output_Dir, TypePCA = TypePCA, FilterPCA=FilterPCA,
+                          nbCPU = nbCPU, MaxRAM = MaxRAM, nb_partitions = 1)
+PCA_Files         = PCA_Output$PCA_Files  
+Pix_Per_Partition = PCA_Output$Pix_Per_Partition
+nb_partitions     = PCA_Output$nb_partitions
+Input_Mask_File   = PCA_Output$MaskPath
+PCA_model         = PCA_Output$PCA_model
+SpectralFilter    = PCA_Output$SpectralFilter
+
+selected_components <- c(1, 2, 3, 4, 5, 6, 7, 8)  # define components automatically
+writeLines(as.character(selected_components), file.path(paste0(Output_Dir, "/", name,
+                                                               "/SPCA/PCA"), "Selected_Components.txt"))
+nb_partitions = 1
+nbclusters    = nbclusters
+for (i in my_list) {
+  
+  Kmeans_info <- map_spectral_species(
+    Input_Image_File = Input_Image_File,
+    Input_Mask_File = PCA_Output$MaskPath,
+    Output_Dir = Output_Dir,
+    SpectralSpace_Output = PCA_Output,
+    nbclusters = nbclusters,
+    nbCPU = nbCPU,
+    MaxRAM = MaxRAM
+  )
+  
+  traits <- data.frame(Kmeans_info$Centroids)
+  
+  colnames(traits) <- c(
+    "PC1", "PC2", "PC3", "PC4",
+    "PC5", "PC6", "PC7", "PC8"
+  )
+  
+  write.table(
+    traits,
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "Traits_", nbclusters,
+        "_NDVI_", NDVI_Thresh,
+        "_Iter_", i, ".txt"
+      )
+    ),
+    row.names = FALSE,
+    quote = FALSE,
+    sep = "\t"
+  )
+  
+  window_size <- window
+  
+  Index_Alpha <- c('Shannon')
+  
+  map_alpha_div(Input_Image_File = Input_Image_File,
+                Output_Dir = Output_Dir,
+                TypePCA = TypePCA,
+                window_size = window_size,
+                nbCPU = nbCPU,
+                MaxRAM = MaxRAM,
+                Index_Alpha = Index_Alpha,
+                nbclusters = nbclusters)
+  
+  map_beta_div(Input_Image_File = Input_Image_File,
+    Output_Dir = Output_Dir,
+    TypePCA = TypePCA,
+    window_size = window_size,
+    nbCPU = nbCPU,
+    MaxRAM = MaxRAM,
+    nbclusters = nbclusters
+  )
+  
+  file.rename(
+    file.path(
+      Output_Dir,
+      name,
+      "SPCA",
+      "BETA",
+      "BetaDiversity_BCdiss_PCO_9"
+    ),
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "BetaDiversity_BCdiss_PCO_9_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i
+      )
+    )
+  )
+  
+  file.rename(
+    file.path(
+      Output_Dir,
+      name,
+      "SPCA",
+      "BETA",
+      "BetaDiversity_BCdiss_PCO_9.hdr"
+    ),
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "BetaDiversity_BCdiss_PCO_9_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i,
+        ".hdr"
+      )
+    )
+  )
+  
+  file.rename(
+    file.path(
+      Output_Dir,
+      name,
+      "SPCA",
+      "SpectralSpecies",
+      "SpectralSpecies"
+    ),
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "SpectralSpecies_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i
+      )
+    )
+  )
+  
+  file.rename(
+    file.path(
+      Output_Dir,
+      name,
+      "SPCA",
+      "SpectralSpecies",
+      "SpectralSpecies.hdr"
+    ),
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "SpectralSpecies_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i,
+        ".hdr"
+      )
+    )
+  )
+  
+  # -----------------------------------------------------------------------
+  # Alpha diversity calculations
+  # -----------------------------------------------------------------------
+  
+  SpecCom_cl100 <- rast(
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "SpectralSpecies_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i
+      )
+    )
+  )
+  
+  r <- SpecCom_cl100
+  
+  fact <- window
+  
+  r_agg <- aggregate(r, fact = fact)
+  
+  r_id <- rast(r_agg)
+  values(r_id) <- 1:ncell(r_id)
+  
+  r_id_10m <- resample(r_id, r, method = "near")
+  
+  vals <- values(r)
+  ids <- values(r_id_10m)
+  
+  dt <- data.table(cell = ids, sp = vals)
+  names(dt) <- c("cell", "sp")
+  
+  Comm1 <- dcast(
+    dt,
+    cell ~ sp,
+    fun.aggregate = length,
+    fill = 0
+  )
+  
+  setnames(
+    Comm1,
+    old = setdiff(names(Comm1), "cell"),
+    new = sprintf(
+      "sp%03d",
+      as.integer(setdiff(names(Comm1), "cell"))
+    )
+  )
+  
+  Comm1 <- Comm1[order(cell)]
+  
+  r_template <- r_agg
+  
+  abund_stack <- rast()
+  
+  for (j in 3:ncol(Comm1)) {
+    
+    r_layer <- rast(r_template)
+    
+    values(r_layer) <- NA
+    
+    values(r_layer)[Comm1$cell] <- Comm1[[j]]
+    
+    abund_stack <- c(abund_stack, r_layer)
+  }
+  
+  names(abund_stack) <- names(Comm1)[-c(1:2)]
+  
+  writeRaster(
+    abund_stack,
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "Species_Distribution_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i,
+        ".tif"
+      )
+    ),
+    overwrite = TRUE
+  )
+  
+  traits <- read.table(
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "Traits_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i,
+        ".txt"
+      )
+    ),
+    header = TRUE,
+    sep = "\t"
+  )
+  
+  rownames(traits) <- names(Comm1)[-c(1:2)]
+  
+  Comm_mat <- as.matrix(Comm1[, -c(1:2)])
+  
+  cell_ids <- Comm1$cell
+  
+  S <- rowSums(Comm_mat > 0)
+  
+  H <- diversity(
+    Comm_mat,
+    index = "shannon"
+  )
+  
+  traits <- traits[colnames(Comm_mat), ]
+  
+  row_totals <- rowSums(Comm_mat)
+  
+  valid <- row_totals > 0
+  
+  Comm_valid <- Comm_mat[valid, ]
+  
+  cells_valid <- cell_ids[valid]
+  
+  fd <- dbFD(
+    x = traits,
+    a = Comm_valid
+  )
+  
+  df.fd.valid <- data.frame(
+    cell = cells_valid,
+    FRic = fd$FRic,
+    FDiv = fd$FDiv,
+    FDis = fd$FDis,
+    RaoQ = fd$RaoQ
+  )
+  
+  df.fd <- data.frame(
+    cell = cell_ids,
+    FRic = NA,
+    FDiv = NA,
+    FDis = NA,
+    RaoQ = NA
+  )
+  
+  idx <- match(
+    df.fd.valid$cell,
+    df.fd$cell
+  )
+  
+  df.fd[idx, -1] <- df.fd.valid[, -1]
+  
+  r_FRic <- rast(r_agg)
+  values(r_FRic)[cell_ids] <- df.fd$FRic
+  
+  r_RaoQ <- rast(r_agg)
+  values(r_RaoQ)[cell_ids] <- df.fd$RaoQ
+  
+  r_FDiv <- rast(r_agg)
+  values(r_FDiv)[cell_ids] <- df.fd$FDiv
+  
+  r_FDis <- rast(r_agg)
+  values(r_FDis)[cell_ids] <- df.fd$FDis
+  
+  r_shade <- rast(r_agg)
+  r_S <- rast(r_agg)
+  r_H <- rast(r_agg)
+  
+  values(r_shade)[cell_ids] <- row_totals
+  values(r_S)[cell_ids] <- S
+  values(r_H)[cell_ids] <- H
+  
+  metrics_stack <- c(
+    r_shade,
+    r_S,
+    r_H,
+    r_FRic,
+    r_FDiv,
+    r_FDis,
+    r_RaoQ
+  )
+  
+  names(metrics_stack) <- c(
+    "Shade",
+    "S",
+    "H",
+    "FRic",
+    "FDiv",
+    "FDis",
+    "RaoQ"
+  )
+  
+  shade <- metrics_stack[["Shade"]]
+  
+  # Retain only 90 × 90 m windows containing
+  # at least 77 vegetated 10 m pixels.
+  metrics_stack_masked <- mask(
+    metrics_stack,
+    shade >= 77,
+    maskvalues = FALSE
+  )
+  
+  writeRaster(
+    metrics_stack_masked,
+    file.path(
+      Output_Dir,
+      name,
+      paste0(
+        "biodiversity_metrics_clean_",
+        nbclusters,
+        "_NDVI_",
+        NDVI_Thresh,
+        "_Iter_",
+        i,
+        ".tif"
+      )
+    ),
+    overwrite = TRUE
+  )
+}
+
+# -------------------------------------------------------------------------
+# RaoQ processing
+# -------------------------------------------------------------------------
+
+mask <- rast(paste0(Output_Dir, "/", name, "/SPCA/ShadeMask_Update"))
+r <- rast(paste0(name, ".tif"))
+crs(mask) <- crs(r)
+stack_masked <- r * mask
+
+dir.create(file.path(Output_Dir, "tiles"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(Output_Dir, "rao_tiles"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(Output_Dir, "rao_final"), recursive = TRUE, showWarnings = FALSE)
+
+res_m        <- res(stack_masked)[1]          # ~10 m
+tile_size_m <- 3000                # 3 km
+# Additional overlap avoids edge effects during
+# moving-window RaoQ calculations.
+overlap_m   <- 100                 # 100 m
+
+e <- ext(r)
+
+x_seq <- seq(e$xmin, e$xmax, by = tile_size_m)
+y_seq <- seq(e$ymin, e$ymax, by = tile_size_m)
+length(y_seq)
+tile_id <- 1
+
+for (x in x_seq) {
+  for (y in y_seq) {
+    core_ext <- ext(
+      x,
+      min(x + tile_size_m, e$xmax),
+      y,
+      min(y + tile_size_m, e$ymax)
+    )
+    tile_ext <- ext(
+      core_ext$xmin - overlap_m,
+      core_ext$xmax + overlap_m,
+      core_ext$ymin - overlap_m,
+      core_ext$ymax + overlap_m
+    )
+    tile_ext <- intersect(tile_ext, e)
+    if (is.null(tile_ext)) next
+    r_tile <- crop(stack_masked, tile_ext, snap = "out")
+    if (all(is.na(values(r_tile)))) next
+    tile_file <- file.path(Output_Dir, "tiles", paste0("tile_", tile_id, ".tif"))
+    writeRaster(r_tile, tile_file, overwrite = TRUE)
+    message("Processing tile ", tile_id)
+    tile_id <- tile_id + 1
+  }
+}
+
+list <- list.files(paste0(Output_Dir, "/tiles"))
+
+for (i in 1:length(list)){
+  help <- rast(paste0(Output_Dir, "/tiles/", list[i]))
+  vals <- values(help, mat = FALSE)
+    if (all(is.na(vals)) || all(vals == 0, na.rm = TRUE)) {
+    next
+  }
+  r_rao <- Rao(help, dist_m = "euclidean", method = "multidimension", window = window_size, rasterOut=TRUE, na.tolerance = 0.05)
+  r_rao_fin9 <- r_rao$window.9$alpha.2
+  writeRaster(r_rao_fin9, paste0(Output_Dir, "/rao_tiles/Rao_09_", list[i]), overwrite = TRUE)
+}
+
+list_rao9 <- list.files(paste0(Output_Dir, "/rao_tiles"), full.names = T)
+rasters <- lapply(list_rao9, rast)
+
+rasters <- sprc(list_rao9)
+merged <- mosaic(rasters, fun = max)
+
+writeRaster(merged, paste0("RaoQ_raw_", name, "_filtered.tif"), overwrite = TRUE)
+
