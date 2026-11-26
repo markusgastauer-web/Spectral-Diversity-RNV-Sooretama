@@ -18,9 +18,13 @@ Repository contents
 Scripts and Purpose
 
 01_spectral_diversity_computation.R	(Spectral species mapping, alpha diversity, beta diversity, and Rao's Q)
+
 02_environmental_predictors.R	(errain, hydrological, and landscape predictors)
+
 03_beta_diversity_alignment.R	 (Within-year and among-year Procrustes alignment)
+
 04_environmental_modelling.R	(Environmental modelling, validation, sensitivity analyses, and temporal recurrence)
+
 
 Input data
 
